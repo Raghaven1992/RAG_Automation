@@ -18,9 +18,6 @@ unstructured[pdf]==0.18.32
 # --- Web Application ---
 streamlit==1.42.0
 
-# --- Monitoring & Observability ---
-prometheus-client==0.21.0
-
 # --- Utility ---
 python-dotenv==1.0.1
 watchdog==4.0.0
