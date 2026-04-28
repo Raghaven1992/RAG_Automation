@@ -11,7 +11,7 @@ pipeline {
         }
         stage('Docker Deploy') {
             steps {
-                // Clean up accidental folders from typos
+                // Ensure no fake folders exist from previous mount failures
                 bat "if exist prometheus.yml\\ rd /s /q prometheus.yml"
                 bat "docker-compose down"
                 bat "docker-compose up --build -d"
@@ -20,10 +20,11 @@ pipeline {
         stage('Open Dashboards') {
             steps {
                 script {
-                    echo "Launching Browser Tabs..."
-                    bat "start http://localhost:8501"  // Chatbot
-                    bat "start http://localhost:9091"  // Prometheus
-                    bat "start http://localhost:3001"  // Grafana
+                    echo "Launching Monitoring & Chatbot..."
+                    // Start /B runs the command in the background so Jenkins can exit
+                    bat 'start "" http://localhost:8501'
+                    bat 'start "" http://localhost:9091'
+                    bat 'start "" http://localhost:3001'
                 }
             }
         }
