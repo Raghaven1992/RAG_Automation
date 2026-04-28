@@ -1,21 +1,34 @@
 import streamlit as st
 import os, time, shutil
-from prometheus_client import Summary, start_http_server
+from prometheus_client import Summary, start_http_server, REGISTRY
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings, OllamaLLM
 from langchain_chroma import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 
-# Start Metrics Server on Port 8000
-try:
-    start_http_server(8000)
-except:
-    pass 
+# --- 1. PROMETHEUS METRICS SETUP (FIXED FOR STREAMLIT RERUNS) ---
+def get_metrics():
+    """Safely initialize metrics by checking if they already exist in the registry."""
+    metric_names = ['search_latency_seconds', 'gen_latency_seconds']
+    collectors = {c._name: c for c in REGISTRY._names_to_collectors.values() if hasattr(c, '_name')}
+    
+    s_lat = collectors.get('search_latency_seconds') or Summary('search_latency_seconds', 'Time spent in vector search')
+    g_lat = collectors.get('gen_latency_seconds') or Summary('gen_latency_seconds', 'Time spent in LLM generation')
+    
+    return s_lat, g_lat
 
-S_LATENCY = Summary('search_latency_seconds', 'Time spent in vector search')
-G_LATENCY = Summary('gen_latency_seconds', 'Time spent in LLM generation')
+# Start Metrics Server on Port 8000 only once
+if 'metrics_started' not in st.session_state:
+    try:
+        start_http_server(8000)
+        st.session_state.metrics_started = True
+    except:
+        pass 
 
+S_LATENCY, G_LATENCY = get_metrics()
+
+# --- 2. CONFIGURATION ---
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
 DATA_PATH = os.getenv("PDF_DATA_PATH", "/app/data")
 CHROMA_PATH = "/app/chroma_db"
@@ -29,6 +42,7 @@ def get_db(path, _embedding_fn):
         return Chroma(persist_directory=path, embedding_function=_embedding_fn)
     return None
 
+# --- 3. UI SIDEBAR ---
 with st.sidebar:
     st.title("⚙️ Engineering Console")
     selected_model = st.selectbox("Select LLM Model", ["llama3.2", "gemma3:4b"])
@@ -44,6 +58,7 @@ with st.sidebar:
             st.success("Ingestion Complete!")
             st.rerun()
 
+# --- 4. MAIN CHAT ---
 st.title("📑 3GPP Packet Core Expert")
 query = st.chat_input("Ask about 5G/EPC Specs...")
 
@@ -58,10 +73,9 @@ if query:
                 results = db.similarity_search(query, k=10)
             
             context = "\n\n".join([d.page_content for d in results])
-            prompt = f"Context: {context}\n\nQuestion: {query}\n\nDetailed Technical Answer:"
+            prompt = f"Context: {context}\n\nQuestion: {query}\n\nTechnical Answer:"
             
             with G_LATENCY.time():
                 response = llm.invoke(prompt)
 
         st.chat_message("assistant").write(response)
-        st.info(f"Latency: Search {S_LATENCY.collect()[0].samples[0].value:.2f}s | Gen {G_LATENCY.collect()[0].samples[0].value:.2f}s")
