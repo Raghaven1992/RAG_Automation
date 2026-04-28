@@ -12,10 +12,11 @@ pipeline {
         }
         stage('Docker Deploy') {
             steps {
-                // 1. Let's see EVERY file Jenkins just checked out
-                bat "dir /b" 
-                
-                // 2. Deployment
+                // Clean up any accidental folders caused by typos
+                bat """
+                if exist "prometheus.yml\\" rd /s /q "prometheus.yml"
+                if exist "promtheus.yml\\" rd /s /q "promtheus.yml"
+                """
                 bat "docker-compose down"
                 bat "docker-compose up --build -d"
             }
