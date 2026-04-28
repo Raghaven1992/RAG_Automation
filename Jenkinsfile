@@ -12,6 +12,16 @@ pipeline {
         }
         stage('Docker Deploy') {
             steps {
+                // 1. Check if prometheus.yml is a directory and delete it if it is
+                bat """
+                if exist "prometheus.yml\\" (
+                echo "Removing fake Prometheus folder..."
+                rd /s /q "prometheus.yml"
+                )
+                """
+                // 2. Verify the file exists (for debugging)
+                bat "dir prometheus.yml"
+                // 3. Deploy
                 bat "docker-compose down"
                 bat "docker-compose up --build -d"
             }
