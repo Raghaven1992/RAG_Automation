@@ -20,13 +20,5 @@ pipeline {
                 bat "docker-compose up --build -d"
             }
         }
-        stage('Verification') {
-            steps {
-                script {
-                    echo "Application is starting..."
-                    bat 'start "" http://localhost:8501'
-                }
-            }
-        }
     }
 }
