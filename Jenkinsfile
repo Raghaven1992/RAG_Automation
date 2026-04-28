@@ -1,7 +1,7 @@
 pipeline {
     agent any
     parameters {
-        string(name: 'PDF_SOURCE_PATH', defaultValue: 'D:\RAG_Automation_V2\RAG_Automation\data', description: 'Local path to PDFs')
+        string(name: 'PDF_SOURCE_PATH', defaultValue: 'D:/RAG_Automation_V2/RAG_Automation/data', description: 'Local path to PDFs')
     }
     stages {
         stage('Sync Data') {
