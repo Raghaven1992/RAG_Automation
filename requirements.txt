@@ -9,11 +9,11 @@ langchain-ollama==1.1.0
 
 # --- Vector Database ---
 langchain-chroma==1.1.0
-chromadb==0.6.3
+chromadb==1.5.8
 
 # --- Document Processing ---
 pypdf==4.2.0
-unstructured[pdf]==0.14.2
+unstructured[pdf]==0.18.32
 
 # --- Web Application ---
 streamlit==1.42.0
