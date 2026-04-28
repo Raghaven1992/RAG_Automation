@@ -1,7 +1,7 @@
 pipeline {
     agent any
     parameters {
-        string(name: 'PDF_SOURCE_PATH', defaultValue: 'D:/RAG_Automation_V2/RAG_Automation/data', description: 'Local path to PDFs')
+        string(name: 'PDF_SOURCE_PATH', defaultValue: 'D:/RAG_Automation_V2/RAG_Automation/data', description: 'Source PDF path')
     }
     stages {
         stage('Sync Data') {
@@ -11,8 +11,13 @@ pipeline {
         }
         stage('Docker Deploy') {
             steps {
-                // Ensure no fake folders exist from previous mount failures
+                // 1. Clean up mount conflicts
                 bat "if exist prometheus.yml\\ rd /s /q prometheus.yml"
+                
+                // 2. Fix permissions for ChromaDB to prevent "Readonly Database" error
+                bat "if exist chroma_db icacls chroma_db /grant Everyone:(OI)(CI)F /T"
+                
+                // 3. Rebuild and Start
                 bat "docker-compose down"
                 bat "docker-compose up --build -d"
             }
@@ -20,11 +25,8 @@ pipeline {
         stage('Open Dashboards') {
             steps {
                 script {
-                    echo "Launching Monitoring & Chatbot..."
-                    // Start /B runs the command in the background so Jenkins can exit
+                    echo "Opening Chatbot..."
                     bat 'start "" http://localhost:8501'
-                    bat 'start "" http://localhost:9091'
-                    bat 'start "" http://localhost:3001'
                 }
             }
         }
