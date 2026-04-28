@@ -1,83 +1,103 @@
 import streamlit as st
-import os, time, shutil
-from prometheus_client import Summary, start_http_server, REGISTRY
+import os
+import time
+import shutil
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings, OllamaLLM
 from langchain_chroma import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 
-# --- 1. PROMETHEUS METRICS SETUP ---
-def get_metrics():
-    """Safely initialize or retrieve metrics from the global registry."""
-    collectors = {c._name: c for c in REGISTRY._names_to_collectors.values() if hasattr(c, '_name')}
-    
-    s_lat = collectors.get('search_latency_seconds') or Summary('search_latency_seconds', 'Time spent in vector search')
-    g_lat = collectors.get('gen_latency_seconds') or Summary('gen_latency_seconds', 'Time spent in LLM generation')
-    
-    return s_lat, g_lat
-
-if 'metrics_started' not in st.session_state:
-    try:
-        start_http_server(8000)
-        st.session_state.metrics_started = True
-    except:
-        pass 
-
-S_LATENCY, G_LATENCY = get_metrics()
-
-# --- 2. CONFIGURATION ---
+# --- 1. DYNAMIC CONFIGURATION ---
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
 DATA_PATH = os.getenv("PDF_DATA_PATH", "/app/data")
 CHROMA_PATH = "/app/chroma_db"
 
 st.set_page_config(page_title="3GPP AI Assistant", layout="wide")
 
+# --- 2. FORCED INGESTION LOGIC ---
 @st.cache_resource
-def get_db(path, _embedding_fn):
-    """Note the underscore in _embedding_fn to skip Streamlit hashing."""
-    if os.path.exists(path):
-        return Chroma(persist_directory=path, embedding_function=_embedding_fn)
-    return None
+def force_ingest_and_load(_embeddings):
+    """Wipes old DB and recreates it every time the app initializes."""
+    if os.path.exists(CHROMA_PATH):
+        # We use a small delay and retries to handle Windows file locks
+        shutil.rmtree(CHROMA_PATH, ignore_errors=True)
+    
+    if not os.path.exists(DATA_PATH) or not os.listdir(DATA_PATH):
+        st.error(f"No PDFs found in {DATA_PATH}. Please add 3GPP specs.")
+        return None
+
+    with st.status("🔄 Fresh Ingestion: Chunking & Embedding Specs..."):
+        loader = DirectoryLoader(DATA_PATH, glob="*.pdf", loader_cls=PyPDFLoader)
+        docs = loader.load()
+        
+        # Using your preferred high-quality chunking settings
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1200, 
+            chunk_overlap=300,
+            separators=["\n\n", "\n", ".", " "]
+        )
+        chunks = text_splitter.split_documents(docs)
+        
+        # Create fresh vector store
+        db = Chroma.from_documents(
+            documents=chunks, 
+            embedding=_embeddings, 
+            persist_directory=CHROMA_PATH
+        )
+        st.success(f"Successfully indexed {len(chunks)} chunks from {len(docs)} PDFs.")
+        return db
 
 # --- 3. UI SIDEBAR ---
 with st.sidebar:
     st.title("⚙️ Engineering Console")
     selected_model = st.selectbox("Select LLM Model", ["llama3.2", "gemma3:4b"])
-    if st.button("🔄 Re-Ingest 3GPP PDFs"):
-        with st.status("Indexing Documents..."):
-            if os.path.exists(CHROMA_PATH):
-                shutil.rmtree(CHROMA_PATH)
-            loader = DirectoryLoader(DATA_PATH, glob="*.pdf", loader_cls=PyPDFLoader)
-            docs = loader.load()
-            splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=300)
-            chunks = splitter.split_documents(docs)
-            embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_URL)
-            Chroma.from_documents(chunks, embeddings, persist_directory=CHROMA_PATH)
-            st.success("Ingestion Complete!")
-            st.rerun()
+    st.info("Note: This app re-indexes your data folder on every fresh session.")
 
 # --- 4. MAIN CHAT INTERFACE ---
 st.title("📑 3GPP Packet Core Expert")
-query = st.chat_input("Ask a 5G/EPC technical question...")
+st.caption(f"Connected to {selected_model} (Self-Ingesting Mode)")
 
-if query:
-    embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_URL)
-    llm = OllamaLLM(model=selected_model, base_url=OLLAMA_URL, num_ctx=8192, temperature=0.1)
-    db = get_db(CHROMA_PATH, _embedding_fn=embeddings)
+# Initialize Embeddings
+embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_URL)
 
-    if db:
-        with st.status("Analyzing Specification..."):
-            with S_LATENCY.time():
-                results = db.similarity_search(query, k=10)
-            
-            context = "\n\n".join([d.page_content for d in results])
-            prompt = f"Context: {context}\n\nQuestion: {query}\n\nDetailed Technical Answer:"
-            
-            with G_LATENCY.time():
-                response = llm.invoke(prompt)
+# Trigger the automatic ingestion
+db = force_ingest_and_load(embeddings)
 
-        st.chat_message("assistant").write(response)
-        st.info(f"Retrieved {len(results)} relevant 3GPP segments.")
-    else:
-        st.warning("Please ingest PDFs first using the sidebar.")
+query = st.chat_input("Ask a technical question about the specs...")
+
+if query and db:
+    llm = OllamaLLM(
+        model=selected_model, 
+        base_url=OLLAMA_URL, 
+        num_ctx=8192, 
+        temperature=0.1
+    )
+
+    with st.spinner("Thinking..."):
+        # Retrieval
+        start_time = time.perf_counter()
+        results = db.similarity_search(query, k=10)
+        
+        # Generation
+        context = "\n\n".join([d.page_content for d in results])
+        template = """
+        ### [SYSTEM INSTRUCTION]
+        You are an 3GPP expert Packet Core Engineer. Explain the technical flow based on the context.
+        
+        ### [CONTEXT]
+        {context}
+        
+        ### [USER QUESTION]
+        {question}
+        
+        ### [RESPONSE]
+        """
+        prompt = template.format(context=context, question=query)
+        response = llm.invoke(prompt)
+        
+        total_time = time.perf_counter() - start_time
+
+    # Display Result
+    st.chat_message("assistant").write(response)
+    st.caption(f"⏱️ Total Response Latency: {total_time:.2f}s")
