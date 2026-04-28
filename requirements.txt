@@ -1,0 +1,26 @@
+# --- Core Framework ---
+langchain==0.4.5
+langchain-community==0.4.2
+langchain-core==0.4.0
+langchain-text-splitters==0.3.5
+
+# --- LLM & Embeddings (Ollama Integration) ---
+langchain-ollama==1.1.0
+
+# --- Vector Database ---
+langchain-chroma==0.2.1
+chromadb==0.6.3
+
+# --- Document Processing ---
+pypdf==4.2.0
+unstructured[pdf]==0.14.0
+
+# --- Web Application ---
+streamlit==1.42.0
+
+# --- Monitoring & Observability ---
+prometheus-client==0.21.0
+
+# --- Utility ---
+python-dotenv==1.0.1
+watchdog==4.0.0
